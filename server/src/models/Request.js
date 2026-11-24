@@ -42,14 +42,25 @@ const requestSchema = new mongoose.Schema(
 
     category: {
       type: String,
-      enum: ["bug", "design", "content", "feature", "performance", "other"],
+      enum: [
+        "bug",
+        "ui_ux",
+        "content",
+        "performance",
+        "seo",
+        "security",
+        "feature",
+        "other",
+      ],
       default: "other",
+      index: true,
     },
 
     priority: {
       type: String,
       enum: ["low", "medium", "high", "urgent"],
       default: "medium",
+      index: true,
     },
 
     status: {
@@ -64,6 +75,7 @@ const requestSchema = new mongoose.Schema(
         "Closed",
       ],
       default: "Submitted",
+      index: true,
     },
 
     attachments: [
@@ -103,7 +115,16 @@ const requestSchema = new mongoose.Schema(
 
       category: {
         type: String,
-        enum: ["bug", "design", "content", "feature", "performance", "other"],
+        enum: [
+          "bug",
+          "ui_ux",
+          "content",
+          "performance",
+          "seo",
+          "security",
+          "feature",
+          "other",
+        ],
       },
 
       priority: {

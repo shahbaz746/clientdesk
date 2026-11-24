@@ -3,10 +3,21 @@ const mongoose = require("mongoose");
 
 const activitySchema = new mongoose.Schema(
   {
+    entityType: {
+      type: String,
+      enum: ["request", "website"],
+      required: [true, "Entity type is required"],
+      default: "request",
+    },
+
+    entityId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: [true, "Entity ID is required"],
+    },
+
     requestId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Request",
-      required: [true, "Request ID is required"],
       index: true,
     },
 
@@ -22,14 +33,18 @@ const activitySchema = new mongoose.Schema(
       enum: [
         "request_created",
         "request_accepted",
+        "request_rejected",
         "status_changed",
         "priority_changed",
         "category_changed",
         "comment_added",
         "attachment_added",
+        "clarification_requested",
         "request_reopened",
         "request_closed",
         "request_updated",
+        "website_created",
+        "website_updated",
       ],
     },
 
@@ -59,6 +74,14 @@ const activitySchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+activitySchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
+
+activitySchema.pre("validate", function setRequestIdForRequestEntities() {
+  if (this.entityType === "request" && this.entityId && !this.requestId) {
+    this.requestId = this.entityId;
+  }
+});
 
 const Activity = mongoose.model("Activity", activitySchema);
 
