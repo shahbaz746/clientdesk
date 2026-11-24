@@ -32,6 +32,7 @@ export default function NewRequest() {
     try {
       const res = await api("/requests", { method: "POST", body: form });
       const id = res.data.request._id;
+      let attachmentsFailed = false;
       if (files.length) {
         const data = new FormData();
         Array.from(files).forEach((file) => data.append("files", file));
@@ -42,10 +43,14 @@ export default function NewRequest() {
             isForm: true,
           });
         } catch (uploadError) {
-          showToast(uploadError.message);
+          attachmentsFailed = true;
         }
       }
-      showToast("Request submitted");
+      showToast(
+        attachmentsFailed
+          ? "Request submitted, but screenshots were not uploaded"
+          : "Request submitted"
+      );
       navigate(`/client/requests/${id}`);
     } catch (err) {
       setError(err.message);

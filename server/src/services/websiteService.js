@@ -1,7 +1,9 @@
+const mongoose = require("mongoose");
 const Website = require("../models/Website");
 const User = require("../models/User");
 const AppError = require("../utils/AppError");
 const { logActivity } = require("./activityService");
+const { assertAllowedPayload } = require("../utils/inputValidation");
 
 async function assertClient(clientId) {
   const client = await User.findById(clientId);
@@ -17,6 +19,11 @@ function canViewWebsite(user, website) {
 }
 
 async function createWebsite(actor, payload) {
+  assertAllowedPayload(
+    payload,
+    ["name", "url", "description", "clientId", "isActive"],
+    "website"
+  );
   await assertClient(payload.clientId);
 
   const website = await Website.create({
@@ -39,36 +46,54 @@ async function createWebsite(actor, payload) {
 }
 
 async function updateWebsite(actor, id, payload) {
-  const website = await Website.findById(id);
-  if (!website) throw new AppError("Website not found", 404);
+  assertAllowedPayload(
+    payload,
+    ["name", "url", "description", "isActive"],
+    "website update"
+  );
+  const session = await mongoose.startSession();
+  let websiteId;
 
-  const allowed = ["name", "url", "description", "isActive"];
-  const changes = [];
+  try {
+    await session.withTransaction(async () => {
+      const website = await Website.findById(id).session(session);
+      if (!website) throw new AppError("Website not found", 404);
 
-  allowed.forEach((field) => {
-    if (payload[field] !== undefined && payload[field] !== website[field]) {
-      changes.push({
-        field,
-        oldValue: website[field],
-        newValue: payload[field],
+      const allowed = ["name", "url", "description", "isActive"];
+      const changes = [];
+
+      allowed.forEach((field) => {
+        if (payload[field] !== undefined && payload[field] !== website[field]) {
+          changes.push({
+            field,
+            oldValue: website[field],
+            newValue: payload[field],
+          });
+          website[field] = payload[field];
+        }
       });
-      website[field] = payload[field];
-    }
-  });
 
-  await website.save();
+      await website.save({ session });
 
-  if (changes.length) {
-    await logActivity({
-      actorId: actor._id,
-      action: "website_updated",
-      entityType: "website",
-      entityId: website._id,
-      changes: changes[0],
-      description: `Website "${website.name}" updated`,
+      for (const change of changes) {
+        await logActivity({
+          actorId: actor._id,
+          action: "website_updated",
+          entityType: "website",
+          entityId: website._id,
+          changes: change,
+          description: `Website "${website.name}" updated`,
+          session,
+        });
+      }
+
+      websiteId = website._id;
     });
+  } finally {
+    await session.endSession();
   }
 
+  const website = await Website.findById(websiteId);
   return website.populate("clientId", "name email");
 }
 

@@ -2,9 +2,18 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function AppShell() {
-  const { user, logout } = useAuth();
+  const { user, logout, showToast } = useAuth();
   const navigate = useNavigate();
   const isDeveloper = user?.role === "developer";
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate("/login");
+    } catch {
+      showToast("Could not log out. Check your connection and try again.");
+    }
+  };
 
   const links = isDeveloper
     ? [
@@ -52,10 +61,7 @@ export default function AppShell() {
           <p className="truncate text-xs text-slate-400">{user?.email}</p>
           <button
             className="mt-3 text-sm text-teal-400 hover:text-teal-300"
-            onClick={() => {
-              logout();
-              navigate("/login");
-            }}
+            onClick={handleLogout}
           >
             Log out
           </button>
@@ -66,10 +72,7 @@ export default function AppShell() {
           <p className="text-sm text-slate-500">Website maintenance requests</p>
           <button
             className="text-sm font-medium text-slate-600 lg:hidden"
-            onClick={() => {
-              logout();
-              navigate("/login");
-            }}
+            onClick={handleLogout}
           >
             Log out
           </button>

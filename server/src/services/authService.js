@@ -3,21 +3,15 @@ const User = require("../models/User");
 const AppError = require("../utils/AppError");
 const generateToken = require("../utils/generateToken");
 const sanitizeUser = require("../utils/sanitizeUser");
+const {
+  validateLoginInput,
+  validateRegistrationInput,
+} = require("../utils/authValidation");
 
-function assertPassword(password) {
-  if (!password || typeof password !== "string" || password.length < 8) {
-    throw new AppError("Password must be at least 8 characters", 400);
-  }
-}
+async function register(input) {
+  const { name, email, password } = validateRegistrationInput(input);
 
-async function register({ name, email, password }) {
-  if (!name || !email) {
-    throw new AppError("Name and email are required", 400);
-  }
-
-  assertPassword(password);
-
-  const existing = await User.findOne({ email: email.toLowerCase().trim() });
+  const existing = await User.findOne({ email });
   if (existing) {
     throw new AppError("Email is already registered", 409);
   }
@@ -32,18 +26,14 @@ async function register({ name, email, password }) {
 
   return {
     user: sanitizeUser(user),
-    token: generateToken(user._id),
+    token: generateToken(user._id, user.tokenVersion),
   };
 }
 
-async function login({ email, password }) {
-  if (!email || !password) {
-    throw new AppError("Email and password are required", 400);
-  }
+async function login(input) {
+  const { email, password } = validateLoginInput(input);
 
-  const user = await User.findOne({ email: email.toLowerCase().trim() }).select(
-    "+passwordHash"
-  );
+  const user = await User.findOne({ email }).select("+passwordHash");
 
   if (!user || !user.isActive) {
     throw new AppError("Invalid email or password", 401);
@@ -56,7 +46,7 @@ async function login({ email, password }) {
 
   return {
     user: sanitizeUser(user),
-    token: generateToken(user._id),
+    token: generateToken(user._id, user.tokenVersion),
   };
 }
 

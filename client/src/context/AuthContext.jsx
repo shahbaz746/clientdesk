@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { api, getToken, setToken } from "../api/client";
+import { api } from "../api/client";
 
 const AuthContext = createContext(null);
 
@@ -15,15 +15,11 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     async function loadUser() {
-      if (!getToken()) {
-        setLoading(false);
-        return;
-      }
+      localStorage.removeItem("clientdesk_token");
       try {
         const res = await api("/auth/me");
         setUser(res.data.user);
       } catch {
-        setToken(null);
         setUser(null);
       } finally {
         setLoading(false);
@@ -37,7 +33,6 @@ export function AuthProvider({ children }) {
       method: "POST",
       body: { email, password },
     });
-    setToken(res.data.token);
     setUser(res.data.user);
     return res.data.user;
   };
@@ -47,13 +42,12 @@ export function AuthProvider({ children }) {
       method: "POST",
       body: { name, email, password },
     });
-    setToken(res.data.token);
     setUser(res.data.user);
     return res.data.user;
   };
 
-  const logout = () => {
-    setToken(null);
+  const logout = async () => {
+    await api("/auth/logout", { method: "POST" });
     setUser(null);
   };
 

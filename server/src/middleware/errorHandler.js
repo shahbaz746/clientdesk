@@ -45,6 +45,10 @@ function errorHandler(err, req, res, next) {
     message = "You can upload at most 5 files";
   }
 
+  if (statusCode >= 500 && process.env.NODE_ENV === "production") {
+    message = "Something went wrong";
+  }
+
   if (process.env.NODE_ENV !== "production" && statusCode === 500) {
     console.error(err);
   }

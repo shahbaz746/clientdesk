@@ -8,8 +8,9 @@ async function logActivity({
   requestId,
   changes,
   description = "",
+  session,
 }) {
-  return Activity.create({
+  const activity = {
     actorId,
     action,
     entityType,
@@ -17,7 +18,13 @@ async function logActivity({
     requestId,
     changes,
     description,
-  });
+  };
+
+  if (session) {
+    return Activity.create([activity], { session }).then(([created]) => created);
+  }
+
+  return Activity.create(activity);
 }
 
 async function listForEntity(entityType, entityId) {

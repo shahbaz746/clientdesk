@@ -1,10 +1,19 @@
+const mongoose = require("mongoose");
 const Request = require("../models/Request");
 const Website = require("../models/Website");
+const Comment = require("../models/Comment");
 const AppError = require("../utils/AppError");
 const {
   assertTransition,
   getStatusAction,
 } = require("../utils/statusTransitions");
+const {
+  assertCanCreateRequest,
+  assertCanUpdateRequest,
+  assertCanRequestClarification,
+  assertAttachmentCapacity,
+} = require("../utils/requestPolicies");
+const { assertAllowedPayload, assertRequestFilters } = require("../utils/inputValidation");
 const { logActivity, listForRequest } = require("./activityService");
 const { getCloudinary, isConfigured } = require("../config/cloudinary");
 
@@ -30,16 +39,15 @@ async function getAuthorizedRequest(user, id) {
 }
 
 async function createRequest(user, payload) {
+  assertAllowedPayload(
+    payload,
+    ["websiteId", "title", "description", "category", "priority"],
+    "request"
+  );
   const website = await Website.findById(payload.websiteId);
   if (!website) throw new AppError("Website not found", 404);
 
-  if (user.role === "client" && String(website.clientId) !== String(user._id)) {
-    throw new AppError("You can only submit requests for your own websites", 403);
-  }
-
-  if (user.role === "developer") {
-    throw new AppError("Clients submit requests; developers manage them", 403);
-  }
+  assertCanCreateRequest(user, website);
 
   const request = await Request.create({
     websiteId: website._id,
@@ -62,6 +70,7 @@ async function createRequest(user, payload) {
 }
 
 async function listRequests(user, query) {
+  assertRequestFilters(query);
   const filter = {};
 
   if (query.status) filter.status = query.status;
@@ -90,70 +99,149 @@ async function listRequests(user, query) {
 }
 
 async function updateRequest(user, id, payload) {
-  const request = await Request.findById(id);
-  if (!request) throw new AppError("Request not found", 404);
+  assertAllowedPayload(
+    payload,
+    ["status", "priority", "category", "summary"],
+    "request update"
+  );
+  const session = await mongoose.startSession();
+  let requestId;
 
-  const website = await Website.findById(request.websiteId);
-  if (!canAccessRequest(user, request, website)) {
-    throw new AppError("You cannot access this request", 403);
+  try {
+    await session.withTransaction(async () => {
+      const request = await Request.findById(id).session(session);
+      if (!request) throw new AppError("Request not found", 404);
+
+      const website = await Website.findById(request.websiteId).session(session);
+      if (!canAccessRequest(user, request, website)) {
+        throw new AppError("You cannot access this request", 403);
+      }
+
+      assertCanUpdateRequest(user, request, payload);
+      const activities = [];
+
+      if (payload.status && payload.status !== request.status) {
+        if (!assertTransition(request.status, payload.status)) {
+          throw new AppError(
+            `Cannot change status from ${request.status} to ${payload.status}`,
+            400
+          );
+        }
+
+        const from = request.status;
+        request.status = payload.status;
+        activities.push({
+          action: getStatusAction(from, payload.status),
+          changes: { field: "status", oldValue: from, newValue: payload.status },
+          description: `Status changed from ${from} to ${payload.status}`,
+        });
+      }
+
+      if (payload.priority && payload.priority !== request.priority) {
+        const oldValue = request.priority;
+        request.priority = payload.priority;
+        activities.push({
+          action: "priority_changed",
+          changes: { field: "priority", oldValue, newValue: payload.priority },
+          description: `Priority changed to ${payload.priority}`,
+        });
+      }
+
+      if (payload.category && payload.category !== request.category) {
+        const oldValue = request.category;
+        request.category = payload.category;
+        activities.push({
+          action: "category_changed",
+          changes: { field: "category", oldValue, newValue: payload.category },
+          description: `Category changed to ${payload.category}`,
+        });
+      }
+
+      if (payload.summary !== undefined) {
+        request.summary = payload.summary;
+      }
+
+      await request.save({ session });
+      for (const activity of activities) {
+        await logActivity({
+          actorId: user._id,
+          entityType: "request",
+          entityId: request._id,
+          ...activity,
+          session,
+        });
+      }
+
+      requestId = request._id;
+    });
+  } finally {
+    await session.endSession();
   }
 
-  if (user.role !== "developer") {
-    throw new AppError("Only the developer can update request fields", 403);
-  }
+  return getAuthorizedRequest(user, requestId);
+}
 
-  if (payload.status && payload.status !== request.status) {
-    if (!assertTransition(request.status, payload.status)) {
-      throw new AppError(
-        `Cannot change status from ${request.status} to ${payload.status}`,
-        400
+async function requestClarification(user, id, message) {
+  const session = await mongoose.startSession();
+  let requestId;
+
+  try {
+    await session.withTransaction(async () => {
+      const request = await Request.findById(id).session(session);
+      if (!request) throw new AppError("Request not found", 404);
+
+      const website = await Website.findById(request.websiteId).session(session);
+      if (!canAccessRequest(user, request, website)) {
+        throw new AppError("You cannot access this request", 403);
+      }
+
+      assertCanRequestClarification(user, message);
+      if (!assertTransition(request.status, "Needs Clarification")) {
+        throw new AppError(
+          `Cannot change status from ${request.status} to Needs Clarification`,
+          400
+        );
+      }
+
+      const previousStatus = request.status;
+      request.status = "Needs Clarification";
+      await request.save({ session });
+
+      const [comment] = await Comment.create(
+        [{ requestId: request._id, authorId: user._id, message: message.trim() }],
+        { session }
       );
-    }
 
-    const from = request.status;
-    request.status = payload.status;
-    await logActivity({
-      actorId: user._id,
-      action: getStatusAction(from, payload.status),
-      entityType: "request",
-      entityId: request._id,
-      changes: { field: "status", oldValue: from, newValue: payload.status },
-      description: `Status changed from ${from} to ${payload.status}`,
+      await logActivity({
+        actorId: user._id,
+        action: "clarification_requested",
+        entityType: "request",
+        entityId: request._id,
+        changes: {
+          field: "status",
+          oldValue: previousStatus,
+          newValue: request.status,
+        },
+        description: "Developer requested clarification",
+        session,
+      });
+      await logActivity({
+        actorId: user._id,
+        action: "comment_added",
+        entityType: "request",
+        entityId: request._id,
+        description: "Clarification message added",
+        session,
+      });
+
+      requestId = request._id;
+      return comment;
     });
+  } finally {
+    await session.endSession();
   }
 
-  if (payload.priority && payload.priority !== request.priority) {
-    const oldValue = request.priority;
-    request.priority = payload.priority;
-    await logActivity({
-      actorId: user._id,
-      action: "priority_changed",
-      entityType: "request",
-      entityId: request._id,
-      changes: { field: "priority", oldValue, newValue: payload.priority },
-      description: `Priority changed to ${payload.priority}`,
-    });
-  }
-
-  if (payload.category && payload.category !== request.category) {
-    const oldValue = request.category;
-    request.category = payload.category;
-    await logActivity({
-      actorId: user._id,
-      action: "category_changed",
-      entityType: "request",
-      entityId: request._id,
-      changes: { field: "category", oldValue, newValue: payload.category },
-      description: `Category changed to ${payload.category}`,
-    });
-  }
-
-  if (payload.summary !== undefined) {
-    request.summary = payload.summary;
-  }
-
-  await request.save();
-  return getAuthorizedRequest(user, request._id);
+  return getAuthorizedRequest(user, requestId);
 }
 
 function uploadBuffer(file) {
@@ -168,6 +256,22 @@ function uploadBuffer(file) {
     );
     stream.end(file.buffer);
   });
+}
+
+function deleteCloudinaryAsset(publicId) {
+  const cloudinary = getCloudinary();
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader.destroy(publicId, (error, result) => {
+      if (error) reject(error);
+      else resolve(result);
+    });
+  });
+}
+
+async function cleanupUploadedAssets(attachments) {
+  await Promise.allSettled(
+    attachments.map((attachment) => deleteCloudinaryAsset(attachment.publicId))
+  );
 }
 
 async function addAttachments(user, id, files) {
@@ -190,28 +294,50 @@ async function addAttachments(user, id, files) {
     throw new AppError("You cannot access this request", 403);
   }
 
+  assertAttachmentCapacity(request.attachments.length, files.length);
+
   const uploaded = [];
-  for (const file of files) {
-    const result = await uploadBuffer(file);
-    uploaded.push({
-      fileName: file.originalname,
-      fileUrl: result.secure_url,
-      publicId: result.public_id,
-      mimeType: file.mimetype,
-      size: file.size,
-    });
+  try {
+    for (const file of files) {
+      const result = await uploadBuffer(file);
+      uploaded.push({
+        fileName: file.originalname,
+        fileUrl: result.secure_url,
+        publicId: result.public_id,
+        mimeType: file.mimetype,
+        size: file.size,
+      });
+    }
+  } catch (error) {
+    await cleanupUploadedAssets(uploaded);
+    throw error;
   }
 
-  request.attachments.push(...uploaded);
-  await request.save();
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const currentRequest = await Request.findById(id).session(session);
+      if (!currentRequest) throw new AppError("Request not found", 404);
+      assertAttachmentCapacity(currentRequest.attachments.length, uploaded.length);
 
-  await logActivity({
-    actorId: user._id,
-    action: "attachment_added",
-    entityType: "request",
-    entityId: request._id,
-    description: `${uploaded.length} attachment(s) added`,
-  });
+      currentRequest.attachments.push(...uploaded);
+      await currentRequest.save({ session });
+
+      await logActivity({
+        actorId: user._id,
+        action: "attachment_added",
+        entityType: "request",
+        entityId: currentRequest._id,
+        description: `${uploaded.length} attachment(s) added`,
+        session,
+      });
+    });
+  } catch (error) {
+    await cleanupUploadedAssets(uploaded);
+    throw error;
+  } finally {
+    await session.endSession();
+  }
 
   return getAuthorizedRequest(user, request._id);
 }
@@ -226,6 +352,7 @@ module.exports = {
   createRequest,
   listRequests,
   updateRequest,
+  requestClarification,
   addAttachments,
   getAuthorizedRequest,
   getRequestWithHistory,

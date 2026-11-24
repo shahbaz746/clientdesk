@@ -7,6 +7,8 @@ export default function Websites() {
   const [websites, setWebsites] = useState([]);
   const [clients, setClients] = useState([]);
   const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", url: "", description: "" });
   const [form, setForm] = useState({
     name: "",
     url: "",
@@ -46,6 +48,27 @@ export default function Websites() {
         method: "PATCH",
         body: { isActive: !website.isActive },
       });
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const startEditing = (website) => {
+    setEditingId(website._id);
+    setEditForm({
+      name: website.name,
+      url: website.url,
+      description: website.description || "",
+    });
+  };
+
+  const saveWebsite = async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/websites/${editingId}`, { method: "PATCH", body: editForm });
+      setEditingId(null);
+      showToast("Website updated");
       await load();
     } catch (err) {
       setError(err.message);
@@ -119,38 +142,81 @@ export default function Websites() {
         ) : (
           websites.map((website) => (
             <article key={website._id} className="card">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="font-semibold">{website.name}</h2>
-                  <a
-                    className="text-sm text-teal-700"
-                    href={website.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {website.url}
-                  </a>
-                </div>
-                <span className="text-xs font-medium text-slate-500">
-                  {website.isActive ? "Active" : "Inactive"}
-                </span>
-              </div>
-              <p className="mt-3 text-sm text-slate-600">
-                {website.description || "No description"}
-              </p>
-              {website.clientId?.name ? (
-                <p className="mt-2 text-xs text-slate-500">
-                  Client: {website.clientId.name}
-                </p>
-              ) : null}
-              {user.role === "developer" ? (
-                <button
-                  className="btn-secondary mt-4"
-                  onClick={() => toggleActive(website)}
-                >
-                  {website.isActive ? "Mark inactive" : "Mark active"}
-                </button>
-              ) : null}
+              {editingId === website._id ? (
+                <form className="space-y-3" onSubmit={saveWebsite}>
+                  <label className="block text-sm font-medium">
+                    Name
+                    <input
+                      className="input mt-1"
+                      required
+                      value={editForm.name}
+                      onChange={(event) => setEditForm({ ...editForm, name: event.target.value })}
+                    />
+                  </label>
+                  <label className="block text-sm font-medium">
+                    URL
+                    <input
+                      className="input mt-1"
+                      type="url"
+                      required
+                      value={editForm.url}
+                      onChange={(event) => setEditForm({ ...editForm, url: event.target.value })}
+                    />
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Description
+                    <textarea
+                      className="input mt-1"
+                      maxLength={500}
+                      value={editForm.description}
+                      onChange={(event) => setEditForm({ ...editForm, description: event.target.value })}
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <button className="btn-primary" type="submit">Save changes</button>
+                    <button className="btn-secondary" type="button" onClick={() => setEditingId(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-semibold">{website.name}</h2>
+                      <a
+                        className="text-sm text-teal-700"
+                        href={website.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {website.url}
+                      </a>
+                    </div>
+                    <span className="text-xs font-medium text-slate-500">
+                      {website.isActive ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">
+                    {website.description || "No description"}
+                  </p>
+                  {website.clientId?.name ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Client: {website.clientId.name}
+                    </p>
+                  ) : null}
+                  {user.role === "developer" ? (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button className="btn-secondary" onClick={() => startEditing(website)}>
+                        Edit details
+                      </button>
+                      <button className="btn-secondary" onClick={() => toggleActive(website)}>
+                        {website.isActive ? "Mark inactive" : "Mark active"}
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
             </article>
           ))
         )}

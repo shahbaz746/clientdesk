@@ -30,6 +30,15 @@ exports.update = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { request } });
 });
 
+exports.requestClarification = asyncHandler(async (req, res) => {
+  const request = await requestService.requestClarification(
+    req.user,
+    req.params.id,
+    req.body.message
+  );
+  res.status(200).json({ success: true, data: { request } });
+});
+
 exports.addAttachments = asyncHandler(async (req, res) => {
   const request = await requestService.addAttachments(
     req.user,

@@ -1,30 +1,40 @@
+const mongoose = require("mongoose");
 const Comment = require("../models/Comment");
 const AppError = require("../utils/AppError");
 const { getAuthorizedRequest } = require("./requestService");
 const { logActivity } = require("./activityService");
+const { validateCommentMessage } = require("../utils/inputValidation");
 
 async function addComment(user, requestId, message) {
-  if (!message || !String(message).trim()) {
-    throw new AppError("Comment cannot be empty", 400);
-  }
+  const normalizedMessage = validateCommentMessage(message);
 
   await getAuthorizedRequest(user, requestId);
+  const session = await mongoose.startSession();
+  let commentId;
 
-  const comment = await Comment.create({
-    requestId,
-    authorId: user._id,
-    message: message.trim(),
-  });
+  try {
+    await session.withTransaction(async () => {
+      const [comment] = await Comment.create(
+        [{ requestId, authorId: user._id, message: normalizedMessage }],
+        { session }
+      );
 
-  await logActivity({
-    actorId: user._id,
-    action: "comment_added",
-    entityType: "request",
-    entityId: requestId,
-    description: "Comment added",
-  });
+      await logActivity({
+        actorId: user._id,
+        action: "comment_added",
+        entityType: "request",
+        entityId: requestId,
+        description: "Comment added",
+        session,
+      });
 
-  return comment.populate("authorId", "name email role");
+      commentId = comment._id;
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  return Comment.findById(commentId).populate("authorId", "name email role");
 }
 
 async function listComments(user, requestId) {

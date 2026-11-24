@@ -40,9 +40,24 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    tokenVersion: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   {
     timestamps: true,
+  }
+);
+
+userSchema.index(
+  { role: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { role: "developer" },
+    name: "one_global_developer",
   }
 );
 

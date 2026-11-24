@@ -17,6 +17,8 @@ export default function RequestDetail() {
   const [comments, setComments] = useState([]);
   const [activity, setActivity] = useState([]);
   const [message, setMessage] = useState("");
+  const [clarificationMessage, setClarificationMessage] = useState("");
+  const [showClarification, setShowClarification] = useState(false);
   const [error, setError] = useState("");
 
   const load = async () => {
@@ -52,6 +54,22 @@ export default function RequestDetail() {
         body: { message },
       });
       setMessage("");
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const submitClarification = async (event) => {
+    event.preventDefault();
+    try {
+      await api(`/requests/${id}/clarification`, {
+        method: "POST",
+        body: { message: clarificationMessage },
+      });
+      setClarificationMessage("");
+      setShowClarification(false);
+      showToast("Clarification requested");
       await load();
     } catch (err) {
       setError(err.message);
@@ -157,7 +175,11 @@ export default function RequestDetail() {
                 className="input mt-1"
                 value=""
                 onChange={(e) => {
-                  if (e.target.value) patch({ status: e.target.value });
+                  if (e.target.value === "Needs Clarification") {
+                    setShowClarification(true);
+                  } else if (e.target.value) {
+                    patch({ status: e.target.value });
+                  }
                 }}
               >
                 <option value="">Change to...</option>
@@ -171,6 +193,33 @@ export default function RequestDetail() {
                 ))}
               </select>
             </div>
+            {showClarification ? (
+              <form onSubmit={submitClarification} className="space-y-3">
+                <label className="block text-sm font-medium" htmlFor="clarification-message">
+                  What information do you need from the client?
+                </label>
+                <textarea
+                  id="clarification-message"
+                  className="input min-h-24"
+                  required
+                  maxLength={2000}
+                  value={clarificationMessage}
+                  onChange={(event) => setClarificationMessage(event.target.value)}
+                />
+                <div className="flex gap-2">
+                  <button className="btn-primary" type="submit">
+                    Send clarification
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    type="button"
+                    onClick={() => setShowClarification(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            ) : null}
             <div>
               <label className="text-sm font-medium">Priority</label>
               <select
@@ -199,8 +248,16 @@ export default function RequestDetail() {
             </div>
           </section>
         ) : (
-          <section className="card text-sm text-slate-600">
-            Status is managed by the developer. Use comments if more information is needed.
+          <section className="card space-y-3 text-sm text-slate-600">
+            <p>Status is managed by the developer. Use comments if more information is needed.</p>
+            {request.status === "Awaiting Client" ? (
+              <button
+                className="btn-primary"
+                onClick={() => patch({ status: "Reopened" })}
+              >
+                Reopen request
+              </button>
+            ) : null}
           </section>
         )}
 

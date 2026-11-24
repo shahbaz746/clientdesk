@@ -19,23 +19,43 @@ async function seedDeveloper() {
     console.error("DEVELOPER_PASSWORD must be at least 8 characters.");
     process.exit(1);
   }
+  if (Buffer.byteLength(password, "utf8") > 72) {
+    console.error("DEVELOPER_PASSWORD cannot exceed 72 UTF-8 bytes.");
+    process.exit(1);
+  }
 
   await connectDB();
 
-  const existing = await User.findOne({ email: email.toLowerCase().trim() });
+  const normalizedEmail = email.toLowerCase().trim();
+  const existing = await User.findOne({ email: normalizedEmail });
   if (existing) {
     if (existing.role !== "developer") {
       console.error("A user with this email already exists and is not a developer.");
       process.exit(1);
     }
-    console.log("Developer account already exists:", existing.email);
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await User.updateOne(
+      { _id: existing._id },
+      {
+        $set: { name, passwordHash },
+        $inc: { tokenVersion: 1 },
+      }
+    );
+    console.log("Developer credentials updated.");
     process.exit(0);
+  }
+
+  const developerExists = await User.exists({ role: "developer" });
+  if (developerExists) {
+    console.error("A global developer account already exists.");
+    process.exit(1);
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
   const user = await User.create({
     name,
-    email,
+    email: normalizedEmail,
     passwordHash,
     role: "developer",
   });

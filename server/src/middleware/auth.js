@@ -4,9 +4,8 @@ const AppError = require("../utils/AppError");
 const asyncHandler = require("../utils/asyncHandler");
 
 const auth = asyncHandler(async (req, res, next) => {
-  const header = req.headers.authorization;
-
-  if (!header || !header.startsWith("Bearer ")) {
+  const token = req.cookies?.clientdesk_token;
+  if (!token) {
     throw new AppError("Please log in", 401);
   }
 
@@ -14,15 +13,39 @@ const auth = asyncHandler(async (req, res, next) => {
     throw new AppError("JWT_SECRET is not configured on the server", 500);
   }
 
-  const token = header.split(" ")[1];
   const decoded = jwt.verify(token, process.env.JWT_SECRET);
   const user = await User.findById(decoded.id);
 
-  if (!user || !user.isActive) {
+  if (
+    !user ||
+    !user.isActive ||
+    decoded.tokenVersion !== user.tokenVersion
+  ) {
     throw new AppError("Account not found or inactive", 401);
   }
 
   req.user = user;
+  next();
+});
+
+const optionalAuth = asyncHandler(async (req, res, next) => {
+  const token = req.cookies?.clientdesk_token;
+  if (!token || !process.env.JWT_SECRET) return next();
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    if (
+      user &&
+      user.isActive &&
+      decoded.tokenVersion === user.tokenVersion
+    ) {
+      req.user = user;
+    }
+  } catch (error) {
+    if (!(error instanceof jwt.JsonWebTokenError)) throw error;
+  }
+
   next();
 });
 
@@ -35,4 +58,4 @@ function authorize(...roles) {
   };
 }
 
-module.exports = { auth, authorize };
+module.exports = { auth, optionalAuth, authorize };
